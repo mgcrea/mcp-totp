@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "totp": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-totp/dist/cli.js"],
+      "env": {
+        "TOTP_CLIENT_ID": "...",
+        "TOTP_CLIENT_SECRET": "...",
+        "TOTP_ALLOW_WRITES": ""
+      }
+    }
+  }
+}
