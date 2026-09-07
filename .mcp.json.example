@@ -4,9 +4,8 @@
       "command": "node",
       "args": ["/absolute/path/to/mcp-totp/dist/cli.js"],
       "env": {
-        "TOTP_CLIENT_ID": "...",
-        "TOTP_CLIENT_SECRET": "...",
-        "TOTP_ALLOW_WRITES": ""
+        "TOTP_ALLOW_WRITES": "1",
+        "TOTP_KEYCHAIN_SERVICE": "com.mgcrea.mcp-totp"
       }
     }
   }
