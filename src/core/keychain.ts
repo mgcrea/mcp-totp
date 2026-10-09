@@ -29,6 +29,34 @@ const isExecError = (
   err: unknown,
 ): err is Error & { code?: number; stderr?: string; killed?: boolean } => err instanceof Error;
 
+/** Run `security`, mapping a timeout to the dialog that almost always causes it. */
+const runSecurity = async (args: string[]): Promise<{ stdout: string; code: number }> => {
+  try {
+    const { stdout } = await execFileAsync(SECURITY, args, {
+      encoding: "utf8",
+      timeout: TIMEOUT_MS,
+    });
+    return { stdout, code: 0 };
+  } catch (err) {
+    if (isExecError(err) && err.killed === true) {
+      throw new KeychainError(
+        `${SECURITY} ${args[0]} timed out after ${TIMEOUT_MS / 1000}s. That almost always ` +
+          `means macOS raised a keychain authorization dialog and is waiting for an answer ` +
+          `— look for it on screen, and allow it.`,
+      );
+    }
+    if (isExecError(err) && typeof err.code === "number") {
+      return { stdout: "", code: err.code };
+    }
+    throw new KeychainError(
+      `Could not run ${SECURITY}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+};
+
+/** Whether this machine has the login keychain this store is built on. */
+const keychainAvailable = (): boolean => process.platform === "darwin" && existsSync(SECURITY);
+
 /**
  * The macOS login keychain, reached through Apple's own `security` CLI so this
  * server stays pure TypeScript with no native addon and no third-party binary.
@@ -46,32 +74,8 @@ const isExecError = (
  *    `security` can read the seed back.
  */
 export const createKeychainStore = (service: string): KeychainStore => {
-  const run = async (args: string[]): Promise<{ stdout: string; code: number }> => {
-    try {
-      const { stdout } = await execFileAsync(SECURITY, args, {
-        encoding: "utf8",
-        timeout: TIMEOUT_MS,
-      });
-      return { stdout, code: 0 };
-    } catch (err) {
-      if (isExecError(err) && err.killed === true) {
-        throw new KeychainError(
-          `${SECURITY} ${args[0]} timed out after ${TIMEOUT_MS / 1000}s. That almost always ` +
-            `means macOS raised a keychain authorization dialog and is waiting for an answer ` +
-            `— look for it on screen, and allow it.`,
-        );
-      }
-      if (isExecError(err) && typeof err.code === "number") {
-        return { stdout: "", code: err.code };
-      }
-      throw new KeychainError(
-        `Could not run ${SECURITY}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  };
-
   const ensure = (): void => {
-    if (!available()) {
+    if (!keychainAvailable()) {
       throw new KeychainError(
         `The macOS keychain is only available on macOS with ${SECURITY} present ` +
           `(this is ${process.platform}). Supply seeds through TOTP_SECRET_<LABEL> instead.`,
@@ -79,14 +83,12 @@ export const createKeychainStore = (service: string): KeychainStore => {
     }
   };
 
-  const available = (): boolean => process.platform === "darwin" && existsSync(SECURITY);
-
   return {
-    available,
+    available: keychainAvailable,
 
     read: async (account) => {
       ensure();
-      const { stdout, code } = await run([
+      const { stdout, code } = await runSecurity([
         "find-generic-password",
         "-s",
         service,
@@ -123,8 +125,8 @@ export const createKeychainStore = (service: string): KeychainStore => {
       // Expressing a rewrite as one delete plus one add stays inside the two
       // operations that never prompt. The cost is a brief window where the item
       // does not exist; nothing here reads across that window.
-      await run(["delete-generic-password", "-s", service, "-a", account]);
-      const { code } = await run([
+      await runSecurity(["delete-generic-password", "-s", service, "-a", account]);
+      const { code } = await runSecurity([
         "add-generic-password",
         "-s",
         service,
@@ -147,7 +149,7 @@ export const createKeychainStore = (service: string): KeychainStore => {
 
     remove: async (account) => {
       ensure();
-      const { code } = await run(["delete-generic-password", "-s", service, "-a", account]);
+      const { code } = await runSecurity(["delete-generic-password", "-s", service, "-a", account]);
       if (code === ITEM_NOT_FOUND) return false;
       if (code !== 0) {
         throw new KeychainError(
